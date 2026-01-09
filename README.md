@@ -1,4 +1,4 @@
-# bs build system
+# bs - a build system for C/C++ projects
 
 `bs` is a zero-dependency "build system" which only requires a C/C++ compiler to work.
 First you compile the build tool and then use the build tool to build your program.
