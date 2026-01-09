@@ -19,9 +19,9 @@
     "   Compiler:           " BS_COMPILER "\n"\
     "   Source files:       " BS_SOURCE_FILES "\n"\
     "   Linker flags:       " BS_LINKER_OPTS "\n"\
-    "   Debug output:       " BS_DEBUG_OUT_FILE _BS_EXT "\n"\
+    "   Debug output:       " _BS_DEBUG_OUT "\n"\
     "   Debug flags:        " BS_DEBUG_OPTS "\n"\
-    "   Release output:     " BS_RELEASE_OUT_FILE _BS_EXT "\n"\
+    "   Release output:     " _BS_RELEASE_OUT "\n"\
     "   Release flags:      " BS_RELEASE_OPTS "\n"\
     "\n"
 
