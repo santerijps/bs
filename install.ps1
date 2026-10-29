@@ -1,1 +1,1 @@
-gcc -o build -O3 -s -march=native build.c
+gcc -o $PSScriptRoot/build -O3 -s -march=native $PSScriptRoot/build.c
