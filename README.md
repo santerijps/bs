@@ -33,8 +33,8 @@ Below usage information can be read by running `bs/build -h`:
 
 ```text
 [bs] usage: build [-hdrRv]
-        -d     Dry runs the build process and prints steps to STDERR.
         -r     Run the program after compiling.
         -R     Compile a release build.
         -v     Print the generated commands to STDERR.
+        -w     Watch mode.
 ```
