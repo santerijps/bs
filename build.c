@@ -3,9 +3,19 @@
 #include <windows.h>
 #include "config.h"
 
+#define RED(x) "\e[1;91m" x "\e[0m"
+#define YELLOW(x) "\e[1;93m" x "\e[0m"
+
+#define PRINT_VERBOSE(type, fmt, ...)\
+    if (flag_verbose) {\
+        fprintf(stderr, YELLOW("[bs] " type ": " fmt "\n"), ## __VA_ARGS__);\
+    }
+
+#define PRINT_ERROR(fmt, ...) fprintf(stderr, RED("[bs] error: " fmt "\n"), ## __VA_ARGS__)
+
 int build_program(void);
 int run_program(void);
-int watch_file_changes(void);
+int watch_mode(void);
 void clear_terminal(void);
 
 char flag_release = 0;
@@ -47,7 +57,7 @@ int main(int argc, char **argv) {
                         flag_watch = 1;
                         break;
                     default:
-                        fprintf(stderr, "\e[1;91m[bs] error: Invalid argument: -%c\n\e[0m", argv[i][j]);
+                        PRINT_ERROR("Invalid argument: -%c", argv[i][j]);
                         return 1;
                 }
             }
@@ -64,7 +74,7 @@ int main(int argc, char **argv) {
         flag_release ? BS_RELEASE_OPTIONS : BS_DEBUG_OPTIONS,
         BS_OUTPUT_PATH, BS_SOURCE_FILES
     )) {
-        fprintf(stderr, "\e[1;91m[bs] error: Failed to write to build buffer. Try increasing BS_COMMAND_BUILD_BUFFER_SIZE.\n\e[0m");
+        PRINT_ERROR("Failed to write to build buffer. Try increasing BS_COMMAND_BUILD_BUFFER_SIZE.");
         return 1;
     }
 
@@ -85,7 +95,8 @@ int main(int argc, char **argv) {
     }
 
     if (flag_watch) {
-        return watch_file_changes();
+        clear_terminal();
+        return watch_mode();
     }
 
     int build_result = build_program();
@@ -104,13 +115,11 @@ int main(int argc, char **argv) {
 }
 
 int build_program(void) {
-    if (flag_verbose) {
-        fprintf(stderr, "\e[1;93m[bs] build: %s\n\e[0m", build_buffer);
-    }
+    PRINT_VERBOSE("BUILD", "%s", build_buffer);
 
     int build_status = system(build_buffer);
     if (build_status != 0) {
-        fprintf(stderr, "\e[1;91m[bs] error: Build failed with error %d\n\e[0m", build_status);
+        PRINT_ERROR("Build failed with error %d", build_status);
         return 1;
     }
 
@@ -118,63 +127,132 @@ int build_program(void) {
 }
 
 int run_program(void) {
-    if (flag_verbose) {
-        fprintf(stderr, "\e[1;93m[bs]   run: %s\n\e[0m", run_buffer);
-    }
-
+    PRINT_VERBOSE("  RUN", "%s", run_buffer);
     int run_status = system(run_buffer);
-
-    if (flag_verbose) {
-        fprintf(stderr, "\e[1;93m[bs]  exit: %d\n\e[0m", run_status);
-    }
-
+    PRINT_VERBOSE(" EXIT", "%d", run_status);
     return run_status;
 }
 
-int watch_file_changes(void) {
-    clear_terminal();
+int watch_mode(void) {
+#ifdef WIN32
+    STARTUPINFO startup_info = {0};
+    PROCESS_INFORMATION process_information = {0};
+    DWORD ts_last_write = 0;
+    BOOL exit_code_was_checked = FALSE;
 
+    // BUILD AND RUN INITIALLY
     int build_result = build_program();
     if (build_result == 0 && flag_run) {
-        run_program();
-    }
-
-#ifdef WIN32
-    HANDLE change_handle = FindFirstChangeNotificationW((LPCWSTR)BS_WATCH_DIRECTORY, TRUE, FILE_NOTIFY_CHANGE_LAST_WRITE);
-    if (change_handle == INVALID_HANDLE_VALUE) {
-        fprintf(stderr, "[bs] error: FindFirstChangeNotificationW failed! Error code: %lu\n\e[0m", GetLastError());
-        return 1;
-    }
-
-    DWORD last_changed = 0;
-
-    for (;;) {
-        DWORD wait_result = WaitForSingleObject(change_handle, 200);
-        if (wait_result == WAIT_OBJECT_0) {
-            if (GetTickCount() - last_changed >= 200) {
-                clear_terminal();
-
-                int build_result = build_program();
-                if (build_result == 0 && flag_run) {
-                    // TODO: If the program is still running, it should be killed
-                    run_program();
-                }
-
-                last_changed = GetTickCount();
-            }
-        }
-
-        if (!FindNextChangeNotification(change_handle)) {
-            fprintf(stderr, "[bs] error: FindNextChangeNotification failed! Error code: %lu\n\e[0m", GetLastError());
+        PRINT_VERBOSE("  RUN", "%s", run_buffer);
+        if (!CreateProcessA(
+            NULL, run_buffer, NULL, NULL,
+            FALSE, 0, NULL, NULL,
+            &startup_info, &process_information
+        )) {
+            PRINT_ERROR("CreateProcessA failed: %lu", GetLastError());
             return 1;
         }
     }
 
-    FindCloseChangeNotification(change_handle);
+    HANDLE change_notification_handle = FindFirstChangeNotificationW((LPCWSTR)BS_WATCH_DIRECTORY, TRUE, FILE_NOTIFY_CHANGE_LAST_WRITE);
+    if (change_notification_handle == INVALID_HANDLE_VALUE) {
+        PRINT_ERROR("FindFirstChangeNotificationW failed: %lu", GetLastError());
+        return 1;
+    }
+
+    do {
+        // PRINT PROCESS EXIT CODE IF THE PROCESS HAS FINISHED
+        if (build_result == 0 && flag_run && flag_verbose && !exit_code_was_checked) {
+            switch (WaitForSingleObject(process_information.hProcess, 0)) {
+                case WAIT_FAILED:
+                    PRINT_ERROR("WaitForSingleObject failed: %lu", GetLastError());
+                    return 1;
+
+                case WAIT_OBJECT_0: {
+                    DWORD exit_code;
+                    if (!GetExitCodeProcess(process_information.hProcess, &exit_code)) {
+                        PRINT_ERROR("GetExitCodeProcess failed: %lu", GetLastError());
+                        return 1;
+                    }
+                    PRINT_VERBOSE(" EXIT", "%lu", exit_code);
+                    exit_code_was_checked = TRUE;
+                    break;
+                }
+            }
+        }
+
+        // POLL FOR CHANGE NOTIFICATIONS
+        switch (WaitForSingleObject(change_notification_handle, 200)) {
+            case WAIT_FAILED:
+                PRINT_ERROR("WaitForSingleObject failed: %lu", GetLastError());
+                return 1;
+
+            case WAIT_OBJECT_0:
+                // RECOMPILE ONLY EVERY 200 MS
+                if (GetTickCount() - ts_last_write < 200) {
+                    continue;
+                }
+                break;
+
+            default:
+                continue;
+        }
+
+        clear_terminal();
+
+        // HANDLE EXISTING PROCESS
+        if (process_information.hProcess != NULL) {
+            switch (WaitForSingleObject(process_information.hProcess, 0)) {
+                case WAIT_FAILED:
+                    PRINT_ERROR("WaitForSingleObject failed: %lu", GetLastError());
+                    return 1;
+
+                // PROCESS IS STILL RUNNING? KILL IT
+                case WAIT_TIMEOUT:
+                    if (!TerminateProcess(process_information.hProcess, EXIT_FAILURE)) {
+                        PRINT_ERROR("TerminateProcess failed: %lu", GetLastError());
+                        return 1;
+                    }
+                    if (WaitForSingleObject(process_information.hProcess, INFINITE) == WAIT_FAILED) {
+                        PRINT_ERROR("WaitForSingleObject failed: %lu", GetLastError());
+                        return 1;
+                    }
+                    break;
+            }
+
+            ZeroMemory(&startup_info, sizeof(startup_info));
+            ZeroMemory(&process_information, sizeof(process_information));
+        }
+
+        // COMPILE AND RUN THE PROGRAM
+        build_result = build_program();
+        if (build_result == 0 && flag_run) {
+            PRINT_VERBOSE("  RUN", "%s", run_buffer);
+            if (!CreateProcessA(
+                NULL, run_buffer, NULL, NULL,
+                FALSE, 0, NULL, NULL,
+                &startup_info, &process_information
+            )) {
+                PRINT_ERROR("CreateProcessA failed: %lu", GetLastError());
+                return 1;
+            }
+            exit_code_was_checked = FALSE;
+        }
+
+        // ONLY ONCE THE PROGRAM HAS BE COMPILED AND RUN DO WE UPDATE THE TIMESTAMP
+        ts_last_write = GetTickCount();
+
+    } while (FindNextChangeNotification(change_notification_handle));
+
+    PRINT_ERROR("FindNextChangeNotification failed: %lu", GetLastError());
+
+    if (!FindCloseChangeNotification(change_notification_handle)) {
+        PRINT_ERROR("FindCloseChangeNotification failed: %lu", GetLastError());
+        return 1;
+    }
 #else
     fprintf(stderr, "[bs] error: Watch mode is not implemented for this platform!\n");
 #endif
-
     return 0;
 }
 
