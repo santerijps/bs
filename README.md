@@ -13,8 +13,7 @@ Below is one way you may want to use **bs**:
 # 1. Go to your project repository.
 cd my-repository
 
-# 2. Copy the needed files: bs.c, config.h, and an appropriate install script.
-# Alternatively, clone the bs repository.
+# 2. Clone the bs repository.
 git clone https://github.com/santerijps/bs.git
 
 # 3. Edit bs/config.h to match your needs.

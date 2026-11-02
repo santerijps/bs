@@ -3,6 +3,7 @@
 #include "config.h"
 
 #ifdef WIN32
+#define UNICODE
 #include <windows.h>
 #endif
 
@@ -98,7 +99,6 @@ int main(int argc, char **argv) {
     }
 
     if (flag_watch) {
-        clear_terminal();
         return watch_mode();
     }
 
@@ -138,10 +138,18 @@ int run_program(void) {
 
 int watch_mode(void) {
 #ifdef WIN32
-    STARTUPINFO startup_info = {0};
+    STARTUPINFOA startup_info = {0};
     PROCESS_INFORMATION process_information = {0};
     DWORD ts_last_write = 0;
     BOOL exit_code_was_checked = FALSE;
+
+    HANDLE change_notification_handle = FindFirstChangeNotificationW(TEXT(BS_WATCH_DIRECTORY), TRUE, FILE_NOTIFY_CHANGE_LAST_WRITE);
+    if (change_notification_handle == INVALID_HANDLE_VALUE) {
+        PRINT_ERROR("FindFirstChangeNotificationW failed: %lu", GetLastError());
+        return 1;
+    }
+
+    clear_terminal();
 
     // BUILD AND RUN INITIALLY
     int build_result = build_program();
@@ -155,12 +163,6 @@ int watch_mode(void) {
             PRINT_ERROR("CreateProcessA failed: %lu", GetLastError());
             return 1;
         }
-    }
-
-    HANDLE change_notification_handle = FindFirstChangeNotificationW((LPCWSTR)BS_WATCH_DIRECTORY, TRUE, FILE_NOTIFY_CHANGE_LAST_WRITE);
-    if (change_notification_handle == INVALID_HANDLE_VALUE) {
-        PRINT_ERROR("FindFirstChangeNotificationW failed: %lu", GetLastError());
-        return 1;
     }
 
     do {
